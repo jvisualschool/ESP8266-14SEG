@@ -4,6 +4,10 @@
 
 ESP8266 NodeMCU에서 두 개의 HT16K33 14-세그먼트 LED 모듈(총 8자리)과 SSD1306 OLED를 **3개의 독립 I2C 버스**로 동시 제어하는 애니메이션 프로젝트입니다.
 
+![Screenshot 1](screenshot1.webp)
+![Screenshot 2](screenshot2.webp)
+
+
 ---
 
 ## ✨ 주요 특징
