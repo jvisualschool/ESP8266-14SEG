@@ -1,0 +1,15 @@
+# Arduino
+*.ino.hex
+*.ino.elf
+*.ino.with_bootloader.bin
+*.ino.with_bootloader.hex
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Secrets (Prevention)
+credentials.h
+secrets.h
+config.h
+.env

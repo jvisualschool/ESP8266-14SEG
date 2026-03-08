@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP8266 Dual Display Preview</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        body {
+            background: #080810;
+            color: #e2e8f0;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 2rem;
+            background-image: radial-gradient(ellipse at 50% 0%, #0a1a10 0%, #080810 70%)
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 800;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, #22c55e, #10b981);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent
+        }
+
+        .dash {
+            background: rgba(12, 18, 14, 0.9);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(34, 197, 94, 0.12);
+            border-radius: 20px;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+            max-width: 960px;
+            width: 100%
+        }
+
+        .section-label {
+            font-size: .7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .12em;
+            color: #4a7a5a;
+            margin-bottom: .5rem
+        }
+
+        /* LED Panel - Dark PCB look */
+        .led-wrap {
+            background: #0a0f0a;
+            padding: 20px 16px;
+            border-radius: 10px;
+            display: flex;
+            gap: 4px;
+            justify-content: center;
+            border: 3px solid #1a2a1a;
+            box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.9), 0 0 30px rgba(34, 197, 94, 0.05);
+            position: relative
+        }
+
+        .led-wrap::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 8px;
+            background: radial-gradient(ellipse at 50% 80%, rgba(34, 197, 94, 0.03) 0%, transparent 70%);
+            pointer-events: none
+        }
+
+        /* Each digit cell */
+        .digit-cell {
+            position: relative;
+            width: 80px;
+            height: 120px
+        }
+
+        .digit-cell canvas {
+            width: 80px;
+            height: 120px
+        }
+
+        /* OLED */
+        .oled-wrap {
+            display: flex;
+            justify-content: center
+        }
+
+        #oled-box {
+            position: relative;
+            background: #020204;
+            border-radius: 4px;
+            border: 5px solid #1a1e2e;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 1), 0 0 20px rgba(56, 189, 248, 0.04);
+            overflow: hidden
+        }
+
+        canvas#oled {
+            display: block;
+            width: 384px;
+            height: 192px;
+            image-rendering: pixelated
+        }
+
+        /* Controls */
+        .ctrl-bar {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center
+        }
+
+        .ctrl-bar select {
+            background: #0a1a10;
+            color: #86efac;
+            border: 1px solid #1a3a2a;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: .9rem;
+            cursor: pointer;
+            min-width: 200px
+        }
+
+        .ctrl-bar select:focus {
+            outline: none;
+            border-color: #22c55e
+        }
+
+        .ctrl-bar button {
+            background: linear-gradient(135deg, #15803d, #22c55e);
+            border: none;
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: .9rem;
+            transition: all .2s
+        }
+
+        .ctrl-bar button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(34, 197, 94, .3)
+        }
+
+        #btn-auto {
+            background: linear-gradient(135deg, #0369a1, #0ea5e9)
+        }
+
+        #btn-auto.active {
+            background: linear-gradient(135deg, #b91c1c, #ef4444)
+        }
+
+        .status {
+            text-align: center;
+            font-size: .78rem;
+            color: #3a5a4a;
+            margin-top: 1rem
+        }
+    </style>
+</head>
+
+<body>
+    <h1>📟 ESP8266 Animation Preview</h1>
+    <div class="dash">
+        <div>
+            <div class="section-label">14-Segment LED × 8 Digits</div>
+            <div class="led-wrap" id="led-ct"></div>
+        </div>
+        <div>
+            <div class="section-label">OLED SSD1306 128×64</div>
+            <div class="oled-wrap">
+                <div id="oled-box"><canvas id="oled" width="128" height="64"></canvas></div>
+            </div>
+        </div>
+        <div class="ctrl-bar">
+            <select id="anim-sel"></select>
+            <button id="btn-play">▶ Play</button>
+            <button id="btn-auto">🔄 Auto Play</button>
+        </div>
+    </div>
+    <div class="status">ESP8266-14Seg 소스 기반 웹 시뮬레이터 · 50 Animations</div>
+
+    <script>
+        // === Segment Constants ===
+        const S = { A: 0x0001, B: 0x0002, C: 0x0004, D: 0x0008, E: 0x0010, F: 0x0020, G1: 0x0040, G2: 0x0080, H: 0x0100, I: 0x0200, J: 0x0400, K: 0x0800, L: 0x1000, M: 0x2000, DP: 0x4000 };
+        const ALL_OUTER = S.A | S.B | S.C | S.D | S.E | S.F;
+        const ALL_MID = S.G1 | S.G2;
+        const ALL_SEG = 0x3FFF;
+
+        const alphafonttable = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0x0006, 0x0220, 0x12CE, 0x12ED, 0, 0x235D, 0x0200, 0x2400, 0x0900, 0x3FC0, 0x12C0, 0x0800, 0x00C0, 0x4000, 0x0C00,
+            0x0C3F, 0x0006, 0x00DB, 0x008F, 0x00E6, 0x00ED, 0x00FD, 0x0007, 0x00FF, 0x00EF, 0, 0, 0, 0, 0, 0,
+            0, 0x00F7, 0x128F, 0x0039, 0x120F, 0x0079, 0x0071, 0x00BD, 0x00F6, 0x1200, 0x001E, 0x2470, 0x0038, 0x0536, 0x2136, 0x003F,
+            0x00F3, 0x083F, 0x20F3, 0x00ED, 0x1201, 0x003E, 0x0C30, 0x2836, 0x2D00, 0x1500, 0x0C09, 0x0039, 0x2100, 0x000F, 0, 0,
+            0, 0x00F7, 0x128F, 0x0039, 0x120F, 0x0079, 0x0071, 0x00BD, 0x00F6, 0x1200, 0x001E, 0x2470, 0x0038, 0x0536, 0x2136, 0x003F,
+            0x00F3, 0x083F, 0x20F3, 0x00ED, 0x1201, 0x003E, 0x0C30, 0x2836, 0x2D00, 0x1500, 0x0C09, 0x0039, 0x2100, 0x000F, 0, 0
+        ];
+
+        // === 14-Segment Canvas Renderer ===
+        // All segments drawn with uniform stroke width using canvas paths
+        const DW = 160, DH = 240; // Canvas resolution per digit
+        const LED_ON = '#00ff66'; // Bright green
+        const LED_GLOW = 'rgba(0,255,102,0.45)';
+        const LED_OFF = 'rgba(20,35,20,0.35)';
+        const STROKE_W = 10; // Uniform width for ALL segments
+
+        // Initialize 8 digit canvases
+        const ledCt = document.getElementById('led-ct');
+        const digitCanvases = [];
+        for (let i = 0; i < 8; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'digit-cell';
+            const c = document.createElement('canvas');
+            c.width = DW; c.height = DH;
+            c.style.width = '80px'; c.style.height = '120px';
+            cell.appendChild(c);
+            ledCt.appendChild(cell);
+            digitCanvases.push(c);
+        }
+
+        function drawSegment(ctx, pts, on, bright) {
+            ctx.beginPath();
+            ctx.moveTo(pts[0][0], pts[0][1]);
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+            ctx.closePath();
+            if (on) {
+                // Glow layers
+                ctx.shadowColor = LED_ON;
+                ctx.shadowBlur = 18 * bright;
+                ctx.fillStyle = `rgba(0,255,102,${0.9 * bright})`;
+                ctx.fill();
+                ctx.shadowBlur = 8 * bright;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                // Bright core
+                ctx.fillStyle = `rgba(180,255,200,${0.5 * bright})`;
+                ctx.fill();
+            } else {
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = LED_OFF;
+                ctx.fill();
+            }
+        }
+
+        function drawDP(ctx, cx, cy, on, bright) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+            if (on) {
+                ctx.shadowColor = LED_ON;
+                ctx.shadowBlur = 14 * bright;
+                ctx.fillStyle = `rgba(0,255,102,${0.9 * bright})`;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = `rgba(180,255,200,${0.4 * bright})`;
+                ctx.fill();
+            } else {
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = LED_OFF;
+                ctx.fill();
+            }
+        }
+
+        // Segment geometry - uniform thickness parallelogram/trapezoid shapes
+        // Canvas coords: 160 x 240, margin ~20px
+        const T = 9; // half-thickness
+        function segGeom() {
+            // Horizontal segments (A, G1, G2, D) as elongated hexagons
+            const hSeg = (x1, x2, cy) => [
+                [x1 + T, cy - T], [x2 - T, cy - T], [x2, cy], [x2 - T, cy + T], [x1 + T, cy + T], [x1, cy]
+            ];
+            // Vertical segments (B, C, E, F) as elongated hexagons
+            const vSeg = (cx, y1, y2) => [
+                [cx, y1], [cx + T, y1 + T], [cx + T, y2 - T], [cx, y2], [cx - T, y2 - T], [cx - T, y1 + T]
+            ];
+            // Diagonal segments - use parallelograms with same visual thickness
+            const dSeg = (x1, y1, x2, y2) => {
+                // Perpendicular offset for uniform width
+                const dx = x2 - x1, dy = y2 - y1;
+                const len = Math.sqrt(dx * dx + dy * dy);
+                const nx = -dy / len * T, ny = dx / len * T;
+                return [
+                    [x1 + nx, y1 + ny], [x2 + nx, y2 + ny],
+                    [x2 - nx, y2 - ny], [x1 - nx, y1 - ny]
+                ];
+            };
+
+            const L = 24, R = 136, CX = 80; // left, right, center X
+            const TA = 20, M = 118, BA = 220;  // top, middle, bottom Y
+
+            return {
+                [S.A]: hSeg(L, R, TA),         // Top
+                [S.D]: hSeg(L, R, BA),         // Bottom
+                [S.G1]: hSeg(L, CX - 2, M),    // Middle Left
+                [S.G2]: hSeg(CX + 2, R, M),    // Middle Right
+                [S.B]: vSeg(R, TA, M),         // Upper Right
+                [S.C]: vSeg(R, M, BA),         // Lower Right
+                [S.E]: vSeg(L, M, BA),         // Lower Left
+                [S.F]: vSeg(L, TA, M),         // Upper Left
+                [S.H]: dSeg(L + 12, TA + 12, CX - 8, M - 8),   // Diag TL
+                [S.I]: vSeg(CX, TA, M),        // Vert Top Center
+                [S.J]: dSeg(R - 12, TA + 12, CX + 8, M - 8),   // Diag TR
+                [S.K]: dSeg(CX + 8, M + 8, R - 12, BA - 12),   // Diag BR
+                [S.L]: vSeg(CX, M, BA),        // Vert Bottom Center
+                [S.M]: dSeg(CX - 8, M + 8, L + 12, BA - 12),   // Diag BL
+            };
+        }
+
+        const SEGS = segGeom();
+        const SEG_KEYS = [S.A, S.B, S.C, S.D, S.E, S.F, S.G1, S.G2, S.H, S.I, S.J, S.K, S.L, S.M];
+
+        let ledBright = 1;
+        function renderDigit(canvas, value, bright) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, DW, DH);
+
+            // Draw ghosted background of all segments first
+            for (const k of SEG_KEYS) {
+                drawSegment(ctx, SEGS[k], false, bright);
+            }
+            // Draw decimal point background
+            drawDP(ctx, 148, DH - 8, false, bright);
+
+            // Draw lit segments
+            for (const k of SEG_KEYS) {
+                if (value & k) drawSegment(ctx, SEGS[k], true, bright);
+            }
+            // Decimal point
+            if (value & S.DP) drawDP(ctx, 148, DH - 8, true, bright);
+        }
+
+        function setAll8(data) {
+            data.forEach((v, i) => renderDigit(digitCanvases[i], v, ledBright));
+        }
+        function clearLED() { setAll8(Array(8).fill(0)); }
+        function setBright(b) { ledBright = Math.max(0.05, b / 15); }
+
+        function displayText8(txt) {
+            let full = txt.padEnd(8, ' ').slice(0, 8);
+            setAll8(Array.from(full).map(c => alphafonttable[c.charCodeAt(0)] || 0));
+        }
+
+        // === OLED Pixel Engine (Blue + Yellow zones) ===
+        const cv = document.getElementById('oled'), cx = cv.getContext('2d');
+        // Y < 48 = Blue zone, Y >= 48 = Yellow zone (bottom 16px = 2 text lines)
+        const OLED_BLUE = [56, 189, 248];   // #38bdf8
+        const OLED_YELLOW = [250, 204, 21]; // #facc15
+
+        const FONT = {};
+        (function () {
+            const raw = {
+                ' ': [0, 0, 0, 0, 0], '!': [0, 0, 0x5F, 0, 0], '"': [0, 7, 0, 7, 0], '#': [0x14, 0x7F, 0x14, 0x7F, 0x14],
+                '$': [0x24, 0x2A, 0x7F, 0x2A, 0x12], '%': [0x23, 0x13, 0x08, 0x64, 0x62], '&': [0x36, 0x49, 0x55, 0x22, 0x50],
+                '\'': [0, 0x05, 0x03, 0, 0], '(': [0, 0x1C, 0x22, 0x41, 0], ')': [0, 0x41, 0x22, 0x1C, 0],
+                '*': [0x14, 0x08, 0x3E, 0x08, 0x14], '+': [0x08, 0x08, 0x3E, 0x08, 0x08], ',': [0, 0x50, 0x30, 0, 0],
+                '-': [0x08, 0x08, 0x08, 0x08, 0x08], '.': [0, 0x60, 0x60, 0, 0], '/': [0x20, 0x10, 0x08, 0x04, 0x02],
+                '0': [0x3E, 0x51, 0x49, 0x45, 0x3E], '1': [0, 0x42, 0x7F, 0x40, 0], '2': [0x42, 0x61, 0x51, 0x49, 0x46],
+                '3': [0x21, 0x41, 0x45, 0x4B, 0x31], '4': [0x18, 0x14, 0x12, 0x7F, 0x10], '5': [0x27, 0x45, 0x45, 0x45, 0x39],
+                '6': [0x3C, 0x4A, 0x49, 0x49, 0x30], '7': [0x01, 0x71, 0x09, 0x05, 0x03], '8': [0x36, 0x49, 0x49, 0x49, 0x36],
+                '9': [0x06, 0x49, 0x49, 0x29, 0x1E], ':': [0, 0x36, 0x36, 0, 0],
+                'A': [0x7E, 0x11, 0x11, 0x11, 0x7E], 'B': [0x7F, 0x49, 0x49, 0x49, 0x36], 'C': [0x3E, 0x41, 0x41, 0x41, 0x22],
+                'D': [0x7F, 0x41, 0x41, 0x22, 0x1C], 'E': [0x7F, 0x49, 0x49, 0x49, 0x41], 'F': [0x7F, 0x09, 0x09, 0x09, 0x01],
+                'G': [0x3E, 0x41, 0x49, 0x49, 0x7A], 'H': [0x7F, 0x08, 0x08, 0x08, 0x7F], 'I': [0, 0x41, 0x7F, 0x41, 0],
+                'J': [0x20, 0x40, 0x41, 0x3F, 0x01], 'K': [0x7F, 0x08, 0x14, 0x22, 0x41], 'L': [0x7F, 0x40, 0x40, 0x40, 0x40],
+                'M': [0x7F, 0x02, 0x0C, 0x02, 0x7F], 'N': [0x7F, 0x04, 0x08, 0x10, 0x7F], 'O': [0x3E, 0x41, 0x41, 0x41, 0x3E],
+                'P': [0x7F, 0x09, 0x09, 0x09, 0x06], 'Q': [0x3E, 0x41, 0x51, 0x21, 0x5E], 'R': [0x7F, 0x09, 0x19, 0x29, 0x46],
+                'S': [0x46, 0x49, 0x49, 0x49, 0x31], 'T': [0x01, 0x01, 0x7F, 0x01, 0x01], 'U': [0x3F, 0x40, 0x40, 0x40, 0x3F],
+                'V': [0x1F, 0x20, 0x40, 0x20, 0x1F], 'W': [0x3F, 0x40, 0x38, 0x40, 0x3F], 'X': [0x63, 0x14, 0x08, 0x14, 0x63],
+                'Y': [0x07, 0x08, 0x70, 0x08, 0x07], 'Z': [0x61, 0x51, 0x49, 0x45, 0x43],
+                'a': [0x20, 0x54, 0x54, 0x54, 0x78], 'b': [0x7F, 0x48, 0x44, 0x44, 0x38], 'c': [0x38, 0x44, 0x44, 0x44, 0x20],
+                'd': [0x38, 0x44, 0x44, 0x48, 0x7F], 'e': [0x38, 0x54, 0x54, 0x54, 0x18], 'f': [0x08, 0x7E, 0x09, 0x01, 0x02],
+                'g': [0x0C, 0x52, 0x52, 0x52, 0x3E], 'h': [0x7F, 0x08, 0x04, 0x04, 0x78], 'i': [0, 0x44, 0x7D, 0x40, 0],
+                'j': [0x20, 0x40, 0x44, 0x3D, 0], 'k': [0x7F, 0x10, 0x28, 0x44, 0], 'l': [0, 0x41, 0x7F, 0x40, 0],
+                'm': [0x7C, 0x04, 0x18, 0x04, 0x78], 'n': [0x7C, 0x08, 0x04, 0x04, 0x78], 'o': [0x38, 0x44, 0x44, 0x44, 0x38],
+                'p': [0x7C, 0x14, 0x14, 0x14, 0x08], 'q': [0x08, 0x14, 0x14, 0x18, 0x7C], 'r': [0x7C, 0x08, 0x04, 0x04, 0x08],
+                's': [0x48, 0x54, 0x54, 0x54, 0x20], 't': [0x04, 0x3F, 0x44, 0x40, 0x20], 'u': [0x3C, 0x40, 0x40, 0x20, 0x7C],
+                'v': [0x1C, 0x20, 0x40, 0x20, 0x1C], 'w': [0x3C, 0x40, 0x30, 0x40, 0x3C], 'x': [0x44, 0x28, 0x10, 0x28, 0x44],
+                'y': [0x0C, 0x50, 0x50, 0x50, 0x3C], 'z': [0x44, 0x64, 0x54, 0x4C, 0x44],
+            };
+            for (let c in raw) FONT[c] = raw[c];
+        })();
+
+        let oledBuf = new Uint8Array(128 * 64);
+        function oledClear() { oledBuf.fill(0); }
+        function oledPixel(x, y, on) { if (x >= 0 && x < 128 && y >= 0 && y < 64) oledBuf[y * 128 + x] = on ? 1 : 0; }
+        function oledHLine(x, y, w) { for (let i = 0; i < w; i++) oledPixel(x + i, y, 1); }
+        function oledRect(x, y, w, h) { oledHLine(x, y, w); oledHLine(x, y + h - 1, w); for (let j = 0; j < h; j++) { oledPixel(x, y + j, 1); oledPixel(x + w - 1, y + j, 1); } }
+        function oledFillRect(x, y, w, h) { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) oledPixel(x + i, y + j, 1); }
+
+        function oledChar(ch, px, py) {
+            const g = FONT[ch]; if (!g) return;
+            for (let col = 0; col < 5; col++) { const bits = g[col]; for (let row = 0; row < 7; row++) { if (bits & (1 << row)) oledPixel(px + col, py + row, 1); } }
+        }
+        function oledText(str, px, py) { for (let i = 0; i < str.length; i++) oledChar(str[i], px + i * 6, py); }
+
+        function oledFlush() {
+            const img = cx.createImageData(128, 64);
+            const SPLIT_Y = 48; // Y >= 48 → yellow zone
+            for (let i = 0; i < 128 * 64; i++) {
+                const y = Math.floor(i / 128);
+                const on = oledBuf[i];
+                const idx = i * 4;
+                if (on) {
+                    const c = (y >= SPLIT_Y) ? OLED_YELLOW : OLED_BLUE;
+                    img.data[idx] = c[0]; img.data[idx + 1] = c[1]; img.data[idx + 2] = c[2]; img.data[idx + 3] = 255;
+                } else {
+                    // Subtle zone tint for off pixels
+                    if (y >= SPLIT_Y) {
+                        img.data[idx] = 8; img.data[idx + 1] = 6; img.data[idx + 2] = 1; img.data[idx + 3] = 255;
+                    } else {
+                        img.data[idx] = 1; img.data[idx + 1] = 2; img.data[idx + 2] = 4; img.data[idx + 3] = 255;
+                    }
+                }
+            }
+            cx.putImageData(img, 0, 0);
+        }
+
+        function oledShow(name, step, total, detail) {
+            const pct = total > 0 ? Math.floor(step / total * 100) : 0;
+            oledClear();
+            oledText("ANIM: " + name, 0, 0);
+            oledHLine(0, 10, 128);
+            if (detail) oledText(detail, 0, 14);
+            // Bottom 2 lines (yellow zone: y>=48)
+            oledText("Step " + step + "/" + total, 0, 48);
+            oledRect(0, 56, 128, 7);
+            const barW = Math.floor(pct / 100 * 126);
+            if (barW > 0) oledFillRect(1, 57, barW, 5);
+            oledFlush();
+        }
+
+        // === Animation Engine ===
+        let running = false, autoPlay = false, animTimer = null, currentAnimIdx = 0;
+        function wait(ms) { return new Promise(r => { animTimer = setTimeout(r, ms); }); }
+        function ok() { return running; }
+        function stopAnim() { running = false; if (animTimer) clearTimeout(animTimer); }
+
+        async function runAnim(fn) {
+            running = true;
+            try { await fn(); } catch (e) { }
+            running = false;
+            setBright(15); ledBright = 1;
+            if (autoPlay) {
+                currentAnimIdx = (currentAnimIdx + 1) % animList.length;
+                document.getElementById('anim-sel').value = currentAnimIdx;
+                setTimeout(() => playSelected(), 400);
+            }
+        }
+
+        // === 50 Animations ===
+        async function anim_outerRingSweep() { const o = [S.A, S.B, S.C, S.D, S.E, S.F]; for (let r = 0; r < 3 && ok(); r++)for (let s = 0; s < 6 && ok(); s++) { oledShow("OUTER RING", r * 6 + s, 18, "Frame sweep"); setAll8(Array(8).fill(o[s])); await wait(120) } }
+        async function anim_shootingStar() { for (let r = 0; r < 3 && ok(); r++)for (let p = 0; p < 8 && ok(); p++) { oledShow("SHOOT STAR", r * 8 + p, 24, "L -> R"); let d = Array(8).fill(0); d[p] = S.G1 | S.G2; setAll8(d); await wait(120) } }
+        async function anim_binaryRain() { for (let i = 0; i < 32 && ok(); i++) { oledShow("BINARY RAIN", i, 32, "01 cascade"); setAll8(Array(8).fill(0).map(() => Math.random() > .5 ? (S.B | S.C) : ALL_OUTER)); await wait(150) } }
+        async function anim_heartbeat() { const br = [0, 2, 5, 10, 15, 10, 5, 2, 0, 0, 0]; for (let r = 0; r < 3 && ok(); r++)for (let b = 0; b < 11 && ok(); b++) { oledShow("HEARTBEAT", r * 11 + b, 33, "Pulse"); setBright(br[b]); setAll8(Array(8).fill(ALL_OUTER | ALL_MID)); await wait(90) } }
+        async function anim_typewriter() { const msg = "HELLO   "; for (let i = 0; i < 8 && ok(); i++) { oledShow("TYPEWRITER", i, 8, msg); displayText8(msg.slice(0, i + 1)); await wait(280) } }
+        async function anim_wipeRight() { for (let p = 0; p < 8 && ok(); p++) { oledShow("WIPE RIGHT", p, 8, "Fill L->R"); let d = Array(8).fill(0); for (let i = 0; i <= p; i++)d[i] = S.A | S.D; setAll8(d); await wait(140) } await wait(300); for (let p = 7; p >= 0 && ok(); p--) { let d = Array(8).fill(0); for (let i = 0; i <= p; i++)d[i] = S.A | S.D; setAll8(d); await wait(140) } }
+        async function anim_verticalFill() { const st = [S.A, S.A | ALL_MID, S.A | ALL_MID | S.D]; for (let s = 0; s < 3 && ok(); s++) { oledShow("VERT FILL", s, 3, "Top->Bottom"); setAll8(Array(8).fill(st[s])); await wait(400) } await wait(300) }
+        async function anim_diagonalCross() { const fr = [S.H | S.K, S.J | S.M, S.H | S.J | S.K | S.M, 0]; for (let r = 0; r < 4 && ok(); r++)for (let f = 0; f < 4 && ok(); f++) { oledShow("DIAG CROSS", r * 4 + f, 16, "X pattern"); setAll8(Array(8).fill(fr[f])); await wait(180) } }
+        async function anim_snake() { const sq = [S.A, S.J, S.B, S.G2, S.G1, S.K, S.C, S.D, S.E, S.M, S.F, S.H, S.I, S.L]; for (let t = 0; t < 28 && ok(); t++) { oledShow("SNAKE", t, 28, "Slither"); setAll8(Array(8).fill(0).map((_, i) => sq[(t + i) % 14])); await wait(100) } }
+        async function anim_explode() { const fr = [S.G1 | S.G2, S.G1 | S.G2 | S.I | S.L, S.A | S.D | ALL_MID | S.I | S.L | S.H | S.J | S.K | S.M, ALL_SEG, 0]; for (let r = 0; r < 3 && ok(); r++)for (let f = 0; f < 5 && ok(); f++) { oledShow("EXPLODE", r * 5 + f, 15, "Burst!"); setAll8(Array(8).fill(fr[f])); await wait(150) } }
+        async function anim_countdown() { for (let n = 8; n >= 0 && ok(); n--) { oledShow("COUNTDOWN", 8 - n, 9, "T-minus..."); let buf = "       " + n; displayText8(buf.slice(-8)); await wait(500) } }
+        async function anim_scanline() { const ln = [S.A, ALL_MID, S.D]; for (let r = 0; r < 4 && ok(); r++)for (let l = 0; l < 3 && ok(); l++) { oledShow("SCANLINE", r * 3 + l, 12, "H-scan"); setAll8(Array(8).fill(ln[l])); await wait(180) } }
+        async function anim_starfield() { const st = [S.DP, S.I, S.H | S.J, S.H | S.J | S.K | S.M]; for (let i = 0; i < 30 && ok(); i++) { oledShow("STARFIELD", i, 30, "Twinkle"); setAll8(Array(8).fill(0).map(() => st[Math.floor(Math.random() * 4)])); await wait(130) } }
+        async function anim_morse() { const pt = [1, 1, 1, 0, 0, 0, 2, 2, 2, 0, 0, 0, 1, 1, 1]; for (let i = 0; i < 15 && ok(); i++) { oledShow("MORSE SOS", i, 15, "... --- ..."); const sym = pt[i] === 1 ? S.DP : pt[i] === 2 ? ALL_MID : 0; setAll8(Array(8).fill(sym)); await wait(pt[i] === 0 ? 250 : 200) } }
+        async function anim_raindrop() { for (let r = 0; r < 3 && ok(); r++) { const col = Math.floor(Math.random() * 8); const st = [S.A, ALL_MID, S.D]; for (let s = 0; s < 3 && ok(); s++) { oledShow("RAIN DROP", r * 3 + s, 9, "Drip"); let d = Array(8).fill(0); d[col] = st[s]; setAll8(d); await wait(160) } } }
+        async function anim_mirror() { for (let t = 0; t < 4 && ok(); t++) { oledShow("MIRROR", t, 4, "Symmetry"); let d = Array(8).fill(0); for (let i = 0; i <= t; i++) { d[3 - i] = S.A | S.D; d[4 + i] = S.A | S.D } setAll8(d); await wait(250) } await wait(300); for (let t = 3; t >= 0 && ok(); t--) { let d = Array(8).fill(0); for (let i = 0; i <= t; i++) { d[3 - i] = S.A | S.D; d[4 + i] = S.A | S.D } setAll8(d); await wait(250) } }
+        async function anim_breathing() { setAll8(Array(8).fill(ALL_OUTER)); for (let r = 0; r < 2 && ok(); r++) { for (let b = 0; b <= 15 && ok(); b++) { oledShow("BREATHING", r * 32 + b, 64, "Inhale..."); setBright(b); await wait(80) } for (let b = 15; b >= 0 && ok(); b--) { oledShow("BREATHING", r * 32 + (31 - b), 64, "Exhale..."); setBright(b); await wait(80) } } }
+        async function anim_domino() { for (let p = 0; p < 8 && ok(); p++) { oledShow("DOMINO", p, 8, "One by one"); let d = Array(8).fill(0); for (let i = 0; i <= p; i++)d[i] = ALL_OUTER; setAll8(d); await wait(180) } await wait(300); for (let p = 7; p >= 0 && ok(); p--) { let d = Array(8).fill(0); for (let i = 0; i <= p; i++)d[i] = ALL_OUTER; setAll8(d); await wait(180) } }
+        async function anim_wave() { const hi = S.A | S.B | S.F, lo = S.D | S.C | S.E; for (let t = 0; t < 24 && ok(); t++) { oledShow("WAVE", t, 24, "Sine wave"); setAll8(Array(8).fill(0).map((_, i) => (i + t) % 2 === 0 ? hi : lo)); await wait(130) } }
+        async function anim_clockTick() { for (let p = 0; p < 8 && ok(); p++) { oledShow("CLOCK TICK", p, 8, "Tick tock"); let d = Array(8).fill(0); d[p] = S.I | S.L; setAll8(d); await wait(250) } }
+        async function anim_pinwheel() { const fr = [S.A, S.J, S.B | S.C, S.K, S.D, S.M, S.E | S.F, S.H]; for (let r = 0; r < 3 && ok(); r++)for (let f = 0; f < 8 && ok(); f++) { oledShow("PINWHEEL", r * 8 + f, 24, "Spin"); setAll8(Array(8).fill(0).map((_, i) => fr[(f + i) % 8])); await wait(100) } }
+        async function anim_telegraph() { const on = ALL_MID | S.I | S.L; for (let t = 0; t < 20 && ok(); t++) { oledShow("TELEGRAPH", t, 20, "Tap tap"); setAll8(Array(8).fill(Math.random() > .3 ? on : 0)); await wait(80 + Math.random() * 150) } }
+        async function anim_fire() { const sp = [S.D, S.D | S.E | S.C, S.D | ALL_MID | S.E | S.C, S.D | ALL_MID | S.A | S.E | S.C, ALL_MID | S.A, S.A]; for (let t = 0; t < 30 && ok(); t++) { oledShow("FIRE", t, 30, "Crackle!"); setAll8(Array(8).fill(0).map(() => sp[Math.floor(Math.random() * 6)])); await wait(100) } }
+        async function anim_matrixFall() { let col = Array(8).fill(0); for (let t = 0; t < 32 && ok(); t++) { oledShow("MATRIX", t, 32, "Follow rabbit"); col[Math.floor(Math.random() * 8)] = Math.random() > .5 ? S.I | S.L : S.B | S.C; setAll8([...col]); col[Math.floor(Math.random() * 8)] = 0; await wait(130) } }
+        async function anim_zenCircle() { const c = [ALL_OUTER, ALL_OUTER | ALL_MID, ALL_OUTER | ALL_MID | S.I | S.L, ALL_SEG]; for (let r = 0; r < 3 && ok(); r++) { for (let f = 0; f < 4 && ok(); f++) { oledShow("ZEN CIRCLE", r * 4 + f, 12, "Fill up"); setAll8(Array(8).fill(c[f])); await wait(250) } clearLED(); await wait(250) } }
+        async function anim_ticker() { const msg = "  HELLO WORLD   ESP8266  14SEG  "; for (let i = 0; i < msg.length && ok(); i++) { oledShow("TICKER", i, msg.length, "Scroll"); displayText8(msg.slice(i, i + 8).padEnd(8)); await wait(180) } }
+        async function anim_pulseCenter() { for (let r = 0; r < 4 && ok(); r++) { for (let t = 0; t < 4 && ok(); t++) { oledShow("PULSE CTR", r * 4 + t, 16, "Heart"); let d = Array(8).fill(0); for (let i = 0; i <= t; i++) { d[3 - i] = ALL_MID; d[4 + i] = ALL_MID } setAll8(d); await wait(100) } clearLED(); await wait(100) } }
+        async function anim_shuffle() { const as = [S.A, S.B, S.C, S.D, S.E, S.F, S.G1, S.G2, S.H, S.I, S.J, S.K, S.L, S.M]; for (let t = 0; t < 28 && ok(); t++) { oledShow("SHUFFLE", t, 28, "Random bits"); setAll8(Array(8).fill(0).map(() => as[Math.floor(Math.random() * 14)])); await wait(130) } }
+        async function anim_crossfade() { const pA = Array(8).fill(S.A | S.D), pB = Array(8).fill(ALL_MID); for (let b = 0; b < 16 && ok(); b++) { oledShow("CROSSFADE", b, 32, "A->B"); setBright(15 - b); setAll8(pA); await wait(60) } for (let b = 0; b < 16 && ok(); b++) { oledShow("CROSSFADE", 16 + b, 32, "B->A"); setBright(b); setAll8(pB); await wait(60) } }
+        async function anim_waterfall() { let buf = Array(8).fill(0); for (let t = 0; t < 24 && ok(); t++) { oledShow("WATERFALL", t, 24, "Flow"); for (let i = 7; i > 0; i--)buf[i] = buf[i - 1]; buf[0] = Math.random() < .33 ? (S.A | S.D | ALL_MID) : 0; setAll8(buf); await wait(150) } }
+        async function anim_morseLove() { const m = ".-.. --- ...- ."; for (let i = 0; i < m.length && ok(); i++) { oledShow("MORSE LOVE", i, m.length, "L-O-V-E"); const sym = m[i] === '.' ? S.DP : m[i] === '-' ? ALL_MID : 0; setAll8(Array(8).fill(sym)); await wait(m[i] === ' ' ? 300 : 230) } }
+        async function anim_neonFlicker() { const on = ALL_OUTER | ALL_MID; for (let t = 0; t < 20 && ok(); t++) { oledShow("NEON FLICK", t, 20, "Zzt..."); setAll8(Array(8).fill(on)); await wait(50 + Math.random() * 250); clearLED(); await wait(20 + Math.random() * 60) } }
+        async function anim_race() { const dl = [200, 160, 130, 100, 80, 60, 50, 40, 35, 30, 30, 30, 40, 60, 100]; for (let t = 0; t < 15 && ok(); t++) { oledShow("RACE", t, 15, "Full speed!"); for (let p = 0; p < 8 && ok(); p++) { let d = Array(8).fill(0); d[p] = ALL_MID | S.A | S.D; setAll8(d); await wait(dl[t]) } } }
+        async function anim_buildUp() { const o = [S.A, S.B, S.C, S.D, S.E, S.F, S.G1, S.G2, S.H, S.I, S.J, S.K, S.L, S.M]; let c = 0; for (let s = 0; s < 14 && ok(); s++) { oledShow("BUILD UP", s, 14, "Add segment"); c |= o[s]; setAll8(Array(8).fill(c)); await wait(180) } await wait(500) }
+        async function anim_tearDown() { const o = [S.M, S.L, S.K, S.J, S.I, S.H, S.G2, S.G1, S.F, S.E, S.D, S.C, S.B, S.A]; let c = ALL_SEG; for (let s = 0; s < 14 && ok(); s++) { oledShow("TEAR DOWN", s, 14, "Remove seg"); c &= ~o[s]; setAll8(Array(8).fill(c)); await wait(180) } }
+        async function anim_bounce() { let p = 0, dir = 1; for (let t = 0; t < 24 && ok(); t++) { oledShow("BOUNCE", t, 24, "Boing!"); let d = Array(8).fill(0); d[p] = ALL_OUTER; setAll8(d); p += dir; if (p === 7 || p === 0) dir = -dir; await wait(130) } }
+        async function anim_loading() { for (let p = 0; p <= 8 && ok(); p++) { oledShow("LOADING", p, 8, "Please wait"); let d = Array(8).fill(0); for (let i = 0; i < p; i++)d[i] = ALL_OUTER | ALL_MID; setAll8(d); await wait(350) } await wait(300) }
+        async function anim_musicNote() { for (let r = 0; r < 4 && ok(); r++)for (let t = 0; t < 8 && ok(); t++) { oledShow("MUSIC", r * 8 + t, 32, "4/4 beat"); let d = Array(8).fill(0); if (t % 2 === 0) { d[0] = S.A | S.F | S.B; d[7] = S.A | S.F | S.B } if (t % 4 === 1) { d[2] = ALL_MID; d[5] = ALL_MID } if (t % 8 === 3) d.fill(S.D | S.E | S.C); setAll8(d); await wait(150) } }
+        async function anim_dnaHelix() { for (let t = 0; t < 32 && ok(); t++) { oledShow("DNA HELIX", t, 32, "Life code"); setAll8(Array(8).fill(0).map((_, i) => { const ph = (i + t) % 4; return ph === 0 ? S.A | S.B : ph === 2 ? S.D | S.E : ALL_MID })); await wait(110) } }
+        async function anim_ripple() { for (let r = 0; r < 4 && ok(); r++) { for (let t = 0; t < 4 && ok(); t++) { oledShow("RIPPLE", r * 4 + t, 16, "Drop"); let d = Array(8).fill(0); if (t === 0) { d[3] = S.DP; d[4] = S.DP } else { if (3 - t + 1 >= 0) d[3 - t + 1] = ALL_MID; if (4 + t - 1 < 8) d[4 + t - 1] = ALL_MID } setAll8(d); await wait(150) } clearLED(); await wait(80) } }
+        async function anim_clockFace() { const cs = [S.A, S.J, S.B, S.K, S.C, S.D, S.M, S.E, S.H, S.F]; for (let r = 0; r < 3 && ok(); r++)for (let s = 0; s < 10 && ok(); s++) { oledShow("CLOCK FACE", r * 10 + s, 30, "Tick"); setAll8(Array(8).fill(cs[s])); await wait(130) } }
+        async function anim_zoomIn() { for (let t = 0; t < 5 && ok(); t++) { oledShow("ZOOM IN", t, 5, "Focus"); let d = Array(8).fill(0); for (let i = t; i < 8 - t; i++)d[i] = ALL_OUTER; setAll8(d); await wait(250) } await wait(300) }
+        async function anim_zoomOut() { for (let t = 4; t >= 0 && ok(); t--) { oledShow("ZOOM OUT", 4 - t, 5, "Wide"); let d = Array(8).fill(0); for (let i = t; i < 8 - t; i++)d[i] = ALL_OUTER; setAll8(d); await wait(250) } await wait(300) }
+        async function anim_ekg() { const w = [0, 0, ALL_MID, S.A | S.I, S.D | S.L, ALL_MID, 0, 0]; let buf = Array(8).fill(0); for (let t = 0; t < 32 && ok(); t++) { oledShow("EKG", t, 32, "Pulse"); for (let i = 7; i > 0; i--)buf[i] = buf[i - 1]; buf[0] = w[t % 8]; setAll8([...buf]); await wait(130) } }
+        async function anim_pixelFade() { for (let t = 0; t < 16 && ok(); t++) { oledShow("PIXEL FADE", t, 16, "Indie glow"); setAll8(Array(8).fill(0).map((_, i) => ((t + i * 2) % 16 < 8) ? ALL_OUTER : 0)); await wait(150) } }
+        async function anim_strobe() { const on = Array(8).fill(ALL_SEG); for (let t = 0; t < 20 && ok(); t++) { oledShow("STROBE", t, 20, "Flash!"); setAll8(on); await wait(50); clearLED(); await wait(50) } }
+        async function anim_gravityFall() { let stack = Array(8).fill(0); for (let b = 0; b < 5 && ok(); b++) { for (let p = 0; p < 8 && ok(); p++) { oledShow("GRAVITY", b * 8 + p, 40, "Stack up"); let d = [...stack]; d[p] = S.A; setAll8(d); await wait(100) } stack[7 - b] = S.D } }
+        async function anim_knightRider() { let p = 0, dir = 1; for (let t = 0; t < 32 && ok(); t++) { oledShow("KNIGHT", t, 32, "KITT scan"); let d = Array(8).fill(0); d[p] = ALL_OUTER | ALL_MID; if (p > 0) d[p - 1] = ALL_MID; if (p < 7) d[p + 1] = ALL_MID; setAll8(d); p += dir; if (p === 7 || p === 0) dir = -dir; await wait(100) } }
+        async function anim_aurora() { const pt = [[S.A, S.A | S.B, S.B, S.B | S.G2, S.G2 | S.G1, S.G1, S.G1 | S.F, S.F], [S.B, S.B | S.G2, S.G2, S.G2 | S.C, S.C, S.C | S.D, S.D, S.D | S.E], [ALL_MID, S.A | S.D, S.B | S.E, S.C | S.F, S.H | S.K, S.J | S.M, S.I | S.L, ALL_MID]]; for (let r = 0; r < 3 && ok(); r++)for (let f = 0; f < 3 && ok(); f++) { oledShow("AURORA", r * 3 + f, 9, "Northern light"); setAll8(pt[f]); await wait(500) } }
+        async function anim_grandFinale() { oledShow("FINALE", 0, 1, "All in!"); for (let r = 0; r < 5 && ok(); r++) { setAll8(Array(8).fill(r % 2 === 0 ? ALL_SEG : 0)); await wait(100) } for (let r = 0; r < 4 && ok(); r++) { let d = Array(8).fill(0); d[3 - r] = ALL_SEG; d[4 + r] = ALL_SEG; setAll8(d); await wait(80) } setAll8(Array(8).fill(ALL_SEG)); for (let b = 15; b >= 0 && ok(); b--) { setBright(b); await wait(100) } clearLED() }
+
+        // === Animation List ===
+        const animList = [
+            { name: "1. Outer Ring Sweep", fn: anim_outerRingSweep }, { name: "2. Shooting Star", fn: anim_shootingStar },
+            { name: "3. Binary Rain", fn: anim_binaryRain }, { name: "4. Heartbeat", fn: anim_heartbeat },
+            { name: "5. Typewriter", fn: anim_typewriter }, { name: "6. Wipe Right", fn: anim_wipeRight },
+            { name: "7. Vertical Fill", fn: anim_verticalFill }, { name: "8. Diagonal Cross", fn: anim_diagonalCross },
+            { name: "9. Snake", fn: anim_snake }, { name: "10. Explode", fn: anim_explode },
+            { name: "11. Countdown", fn: anim_countdown }, { name: "12. Scanline", fn: anim_scanline },
+            { name: "13. Starfield", fn: anim_starfield }, { name: "14. Morse SOS", fn: anim_morse },
+            { name: "15. Rain Drop", fn: anim_raindrop }, { name: "16. Mirror", fn: anim_mirror },
+            { name: "17. Breathing", fn: anim_breathing }, { name: "18. Domino", fn: anim_domino },
+            { name: "19. Wave", fn: anim_wave }, { name: "20. Clock Tick", fn: anim_clockTick },
+            { name: "21. Pinwheel", fn: anim_pinwheel }, { name: "22. Telegraph", fn: anim_telegraph },
+            { name: "23. Fire", fn: anim_fire }, { name: "24. Matrix Fall", fn: anim_matrixFall },
+            { name: "25. Zen Circle", fn: anim_zenCircle }, { name: "26. Ticker", fn: anim_ticker },
+            { name: "27. Pulse Center", fn: anim_pulseCenter }, { name: "28. Shuffle", fn: anim_shuffle },
+            { name: "29. Crossfade", fn: anim_crossfade }, { name: "30. Waterfall", fn: anim_waterfall },
+            { name: "31. Morse Love", fn: anim_morseLove }, { name: "32. Neon Flicker", fn: anim_neonFlicker },
+            { name: "33. Race", fn: anim_race }, { name: "34. Build Up", fn: anim_buildUp },
+            { name: "35. Tear Down", fn: anim_tearDown }, { name: "36. Bounce", fn: anim_bounce },
+            { name: "37. Loading", fn: anim_loading }, { name: "38. Music Note", fn: anim_musicNote },
+            { name: "39. DNA Helix", fn: anim_dnaHelix }, { name: "40. Ripple", fn: anim_ripple },
+            { name: "41. Clock Face", fn: anim_clockFace }, { name: "42. Zoom In", fn: anim_zoomIn },
+            { name: "43. Zoom Out", fn: anim_zoomOut }, { name: "44. EKG", fn: anim_ekg },
+            { name: "45. Pixel Fade", fn: anim_pixelFade }, { name: "46. Strobe", fn: anim_strobe },
+            { name: "47. Gravity Fall", fn: anim_gravityFall }, { name: "48. Knight Rider", fn: anim_knightRider },
+            { name: "49. Aurora", fn: anim_aurora }, { name: "50. Grand Finale", fn: anim_grandFinale }
+        ];
+
+        // Build dropdown
+        const sel = document.getElementById('anim-sel');
+        animList.forEach((a, i) => { const o = document.createElement('option'); o.value = i; o.textContent = a.name; sel.appendChild(o) });
+
+        function playSelected() { stopAnim(); currentAnimIdx = parseInt(sel.value); runAnim(animList[currentAnimIdx].fn) }
+        document.getElementById('btn-play').onclick = () => { autoPlay = false; document.getElementById('btn-auto').classList.remove('active'); document.getElementById('btn-auto').textContent = '🔄 Auto Play'; playSelected() };
+        document.getElementById('btn-auto').onclick = function () { autoPlay = !autoPlay; this.classList.toggle('active', autoPlay); this.textContent = autoPlay ? '⏹ Stop Auto' : '🔄 Auto Play'; if (autoPlay) playSelected(); else stopAnim() };
+        playSelected();
+    </script>
+</body>
+
+</html>
